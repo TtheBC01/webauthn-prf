@@ -105,10 +105,11 @@ async function deriveEthAddress() {
 
     const publicKey = {
       challenge,
-      allowCredentials: [{ id: credIdBuf, type: "public-key" }],
+      allowCredentials: [{ id: credIdBuf, type: "public-key", transports: ["usb", "ble", "nfc", "internal"] }],
       rpId: location.hostname,
       timeout: 60000,
       userVerification: "preferred",
+      mediation: "required",
       extensions: {
         prf: {
           eval: {
