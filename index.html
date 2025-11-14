@@ -21,7 +21,84 @@
   <h3>Output</h3>
   <pre id="out">No output yet.</pre>
 
+  <h3>Environment</h3>
+  <pre id="env">Detecting…</pre>
+
   <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.umd.min.js"></script>
+
+<script>
+function detectEnvironment() {
+  const ua = navigator.userAgent || navigator.userAgentData?.brands?.map(b => b.brand).join(" ") || "";
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+  const isTablet = /iPad|Tablet|Nexus 7|Nexus 10/i.test(ua);
+  const isDesktop = !isMobile && !isTablet;
+
+  // Detect browser
+  let browser = "Unknown";
+  if (/Chrome\/|CriOS\//.test(ua) && !/Edg\//.test(ua)) browser = "Chrome";
+  else if (/Safari\//.test(ua) && !/Chrome|CriOS|Edg\//.test(ua)) browser = "Safari";
+  else if (/Firefox\//.test(ua)) browser = "Firefox";
+  else if (/Edg\//.test(ua)) browser = "Edge";
+  else if (/OPR\//.test(ua)) browser = "Opera";
+
+  // OS
+  let os = "Unknown";
+  if (/Windows/.test(platform)) os = "Windows";
+  else if (/Mac/.test(platform)) os = "macOS";
+  else if (/iPhone|iPad|iPod/.test(ua)) os = "iOS";
+  else if (/Android/.test(ua)) os = "Android";
+  else if (/Linux/.test(platform)) os = "Linux";
+
+  // Password Manager container detection (very rough but useful)
+  const is1Password =
+    /1Password|agilebits/i.test(ua) ||
+    (isMobile && /Safari/.test(browser) && /Mac|iOS/.test(os) && !!window.webkit?.messageHandlers?.credentials);
+  
+  const isBitwarden = /Bitwarden/i.test(ua);
+  const isDashlane = /Dashlane/i.test(ua);
+
+  // Passkey / platform authenticator availability
+  const webauthnSupported = !!window.PublicKeyCredential;
+  const isPlatformAuthenticator = navigator.credentials?.isUserVerifyingPlatformAuthenticatorAvailable
+    ? "Checking..."
+    : "Not supported";
+
+  const env = {
+    userAgent: ua,
+    platform: platform,
+    os,
+    browser,
+    formFactor: isMobile ? "Mobile" : isTablet ? "Tablet" : "Desktop",
+    isMobile,
+    isTablet,
+    isDesktop,
+    inPasswordManager: is1Password || isBitwarden || isDashlane,
+    passwordManager: is1Password
+      ? "1Password"
+      : isBitwarden
+      ? "Bitwarden"
+      : isDashlane
+      ? "Dashlane"
+      : "No",
+    webauthnSupported,
+    platformAuthenticator: isPlatformAuthenticator
+  };
+
+  const envPre = document.getElementById("env");
+  envPre.textContent = JSON.stringify(env, null, 2);
+
+  if (navigator.credentials?.isUserVerifyingPlatformAuthenticatorAvailable) {
+    navigator.credentials.isUserVerifyingPlatformAuthenticatorAvailable()
+      .then(result => {
+        env.platformAuthenticator = result ? "Available" : "Not available";
+        envPre.textContent = JSON.stringify(env, null, 2);
+      });
+  }
+}
+
+detectEnvironment();
+</script>
 
 <script>
 const outEl = document.getElementById('out');
