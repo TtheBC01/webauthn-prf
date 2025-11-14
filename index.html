@@ -2,30 +2,25 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>WebAuthn PRF → Ethereum address demo</title>
+  <title>WebAuthn PRF → Ethereum address demo (Resident Keys)</title>
   <style>
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding: 1.5rem; max-width: 720px; }
     button { margin: .5rem 0; padding: .5rem 1rem; }
     pre { background:#f6f8fa; padding: .75rem; border-radius:6px; overflow:auto; }
-    input { padding: .5rem; width: 100%; margin: .5rem 0; }
   </style>
 </head>
 <body>
-  <h1>WebAuthn PRF → Ethereum address (demo)</h1>
-  <p>Register a passkey with PRF, then derive a deterministic Ethereum address from it.</p>
+  <h1>WebAuthn PRF → Ethereum address (resident keys)</h1>
+  <p>This version uses discoverable credentials (resident keys).</p>
 
-  <button id="registerBtn">Register (enable PRF)</button>
+  <button id="registerBtn">Register Passkey (PRF + Resident Key)</button>
   <br><br>
 
-  <label>Enter credential ID (base64url):</label>
-  <input id="credIdInput" placeholder="Leave empty to use localStorage value" />
-
-  <button id="deriveBtn">Derive ETH address</button>
+  <button id="deriveBtn">Derive ETH address (auto-pick passkey)</button>
 
   <h3>Output</h3>
   <pre id="out">No output yet.</pre>
 
-  <!-- Ethers.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@6/dist/ethers.umd.min.js"></script>
 
 <script>
@@ -34,34 +29,35 @@ const out = (v) => { outEl.textContent = typeof v === 'string' ? v : JSON.string
 
 // helpers
 const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
-const b64 = (buf) => {
-  const s = String.fromCharCode(...new Uint8Array(buf));
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-};
-const unb64 = (s) => {
-  s = s.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = 4 - (s.length % 4);
-  if (pad !== 4) s += "=".repeat(pad);
-  const bin = atob(s);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return arr.buffer;
-};
 const bufToHex = (buf) => Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 const SECP256K1_N = BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
 
-// register enabling PRF
+//
+// 1. REGISTER — create resident passkey with PRF
+//
 async function registerWithPrf() {
   try {
     const challenge = randomBytes(32);
-    const userId = randomBytes(16);
 
     const publicKey = {
       challenge,
-      rp: { name: "Example (demo)", id: location.hostname },
-      user: { id: userId, name: "demo-user@example.com", displayName: "Demo User" },
+      rp: { name: "Example (resident demo)", id: location.hostname },
+      user: {
+        id: randomBytes(16),
+        name: "demo@example.com",
+        displayName: "Demo User"
+      },
+
       pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+
+      // 🔥 Require resident key (discoverable credential)
+      authenticatorSelection: {
+        residentKey: "required",
+        requireResidentKey: true
+      },
+
       extensions: { prf: {} },
+
       timeout: 60000,
       attestation: "none"
     };
@@ -69,43 +65,31 @@ async function registerWithPrf() {
     const cred = await navigator.credentials.create({ publicKey });
     if (!cred) throw new Error("Credential creation failed or dismissed");
 
-    const rawId = cred.rawId;
-    const rawIdB64 = b64(rawId);
-    const rawIdHex = bufToHex(rawId);
-
-    localStorage.setItem('webauthn-credential-id', rawIdB64);
+    const rawIdHex = bufToHex(cred.rawId);
 
     out({
-      message: "Registered credential and enabled PRF.",
-      credentialId_base64url: rawIdB64,
+      message: "Registered resident passkey with PRF.",
       credentialId_hex: rawIdHex,
-      note: "You can copy this credential ID to another device to test synced passkeys."
+      note: "No need to store credential ID — authenticator will discover it."
     });
 
   } catch (err) {
-    out("Register error: " + (err && err.message || err));
+    out("Register error: " + err.message);
     console.error(err);
   }
 }
 
-// derive PRF + HKDF -> 32 bytes -> Ethereum address
+//
+// 2. DERIVE — PRF via discoverable credential
+//
 async function deriveEthAddress() {
   try {
-    const manual = document.getElementById("credIdInput").value.trim();
-    const stored = localStorage.getItem('webauthn-credential-id');
-
-    const selected = manual || stored;
-    if (!selected)
-      throw new Error("No credential ID provided. Enter one manually or click Register.");
-
-    const credIdBuf = unb64(selected);
-
     const challenge = randomBytes(32);
     const infoLabel = new TextEncoder().encode("com.example.eth-key-v1");
 
+    // 🔥 Notice: NO allowCredentials — so browser triggers account discovery UI
     const publicKey = {
       challenge,
-      allowCredentials: [{ id: credIdBuf, type: "public-key", transports: ["usb", "ble", "nfc", "internal"] }],
       rpId: location.hostname,
       timeout: 60000,
       userVerification: "preferred",
@@ -128,22 +112,23 @@ async function deriveEthAddress() {
     const prfOutput = ext.prf.results.first;
 
     const ethPrivHex = await prfToValidEthPrivKey(prfOutput, infoLabel);
-    const priv0x = "0x" + ethPrivHex;
-
-    const wallet = new ethers.Wallet(priv0x);
+    const wallet = new ethers.Wallet("0x" + ethPrivHex);
 
     out({
-      derivedFromCredentialId: selected,
-      privateKey: priv0x,
+      derivedUsing: "resident credential",
+      privateKey: wallet.privateKey,
       address: wallet.address
     });
 
   } catch (err) {
-    out("Derive error: " + (err && err.message || err));
+    out("Derive error: " + err.message);
     console.error(err);
   }
 }
 
+//
+// Convert PRF output → valid secp256k1 private key
+//
 async function prfToValidEthPrivKey(prfBuf, infoLabel) {
   const baseKey = await crypto.subtle.importKey("raw", prfBuf, "HKDF", false, ["deriveBits"]);
   const salt = new Uint8Array(32);
@@ -159,22 +144,19 @@ async function prfToValidEthPrivKey(prfBuf, infoLabel) {
       8 * 32
     );
     const privBytes = new Uint8Array(bits);
-    const hex = bufToHex(privBytes.buffer);
 
     let n = 0n;
-    for (let i = 0; i < privBytes.length; ++i) n = (n << 8n) + BigInt(privBytes[i]);
-    if (n === 0n) continue;
-    if (n >= SECP256K1_N) continue;
+    for (let b of privBytes) n = (n << 8n) + BigInt(b);
 
-    return hex;
+    if (n > 0n && n < SECP256K1_N) return bufToHex(privBytes.buffer);
   }
-  throw new Error("Failed to derive valid secp256k1 private key after retries");
+  throw new Error("Failed to derive valid privkey after retries");
 }
 
 document.getElementById('registerBtn').addEventListener('click', registerWithPrf);
 document.getElementById('deriveBtn').addEventListener('click', deriveEthAddress);
 
-out("Ready. Register or enter a credential ID and derive the same Ethereum key from a synced passkey.");
+out("Ready. Register a resident passkey and derive the same Ethereum key across synced devices.");
 </script>
 </body>
 </html>
