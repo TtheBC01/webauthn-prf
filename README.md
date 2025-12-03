@@ -16,7 +16,7 @@ This concept is most useful if the passkey is stored a service that can sync the
 There are two patterns that prevent the user from generating duplicate credentials when authenticating on your site: 
 
 1. server-managed credentials (most common)
-2. Discoverable/residential credentials
+2. [Discoverable/residential credentials](https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API#discoverable_credentials_and_conditional_mediation)
 
 ### Non-Resident Credentials
 
