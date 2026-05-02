@@ -49,6 +49,27 @@ const unb64 = (s) => {
 };
 const bufToHex = (buf) => Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 const SECP256K1_N = BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+const previewBytes = (value, max = 16) => {
+  try {
+    if (value instanceof ArrayBuffer) return Array.from(new Uint8Array(value).slice(0, max));
+    if (ArrayBuffer.isView(value)) return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice(0, max));
+  } catch (err) {
+    return ["<preview-error>", String(err)];
+  }
+  return null;
+};
+const describeValue = (value) => ({
+  type: typeof value,
+  isNull: value === null,
+  constructorName: value && value.constructor ? value.constructor.name : null,
+  isArrayBuffer: value instanceof ArrayBuffer,
+  isView: ArrayBuffer.isView(value),
+  byteLength: value && typeof value.byteLength === "number" ? value.byteLength : null,
+  hasBufferProp: !!(value && value.buffer),
+  bufferByteLength: value && value.buffer && typeof value.buffer.byteLength === "number" ? value.buffer.byteLength : null,
+  keys: value && typeof value === "object" ? Object.keys(value).slice(0, 10) : [],
+  preview: previewBytes(value)
+});
 
 // register enabling PRF
 async function registerWithPrf() {
@@ -122,6 +143,10 @@ async function deriveEthAddress() {
     if (!assertion) throw new Error("Assertion failed or dismissed");
 
     const ext = assertion.getClientExtensionResults?.();
+    console.log("[deriveEthAddress] extension results", ext);
+    console.log("[deriveEthAddress] ext.prf summary", describeValue(ext && ext.prf));
+    console.log("[deriveEthAddress] ext.prf.results summary", describeValue(ext && ext.prf && ext.prf.results));
+    console.log("[deriveEthAddress] ext.prf.results.first summary", describeValue(ext && ext.prf && ext.prf.results && ext.prf.results.first));
     if (!ext || !ext.prf || !ext.prf.results || !ext.prf.results.first)
       throw new Error("PRF result missing — authenticator may not support PRF.");
 
@@ -145,6 +170,22 @@ async function deriveEthAddress() {
 }
 
 async function prfToValidEthPrivKey(prfBuf, infoLabel) {
+  console.log("[prfToValidEthPrivKey] prfBuf received", describeValue(prfBuf));
+  console.log("[prfToValidEthPrivKey] infoLabel received", describeValue(infoLabel));
+
+  if (!(prfBuf instanceof ArrayBuffer) && !ArrayBuffer.isView(prfBuf)) {
+    console.warn("[prfToValidEthPrivKey] PRF value is not a BufferSource; raw value:", prfBuf);
+  }
+
+  let importKeyInput = prfBuf;
+  if (prfBuf && typeof prfBuf === "object" && prfBuf.buffer instanceof ArrayBuffer) {
+    importKeyInput = ArrayBuffer.isView(prfBuf)
+      ? prfBuf
+      : new Uint8Array(prfBuf.buffer, prfBuf.byteOffset || 0, prfBuf.byteLength || prfBuf.buffer.byteLength);
+  }
+
+  console.log("[prfToValidEthPrivKey] importKey input", describeValue(importKeyInput));
+
   const baseKey = await crypto.subtle.importKey("raw", prfBuf, "HKDF", false, ["deriveBits"]);
   const salt = new Uint8Array(32);
 
