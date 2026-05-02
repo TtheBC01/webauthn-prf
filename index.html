@@ -70,6 +70,29 @@ const describeValue = (value) => ({
   keys: value && typeof value === "object" ? Object.keys(value).slice(0, 10) : [],
   preview: previewBytes(value)
 });
+const normalizeToBytes = (value) => {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+
+  // Some passkey providers return PRF bytes as plain JS number arrays.
+  if (Array.isArray(value) && value.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
+    return new Uint8Array(value);
+  }
+
+  // Defensive fallback for `{ data: [...] }`-style byte payloads.
+  if (
+    value &&
+    typeof value === "object" &&
+    Array.isArray(value.data) &&
+    value.data.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
+  ) {
+    return new Uint8Array(value.data);
+  }
+
+  throw new Error(
+    "PRF output is not byte-like. Expected ArrayBuffer/TypedArray or byte array."
+  );
+};
 
 // register enabling PRF
 async function registerWithPrf() {
@@ -177,16 +200,11 @@ async function prfToValidEthPrivKey(prfBuf, infoLabel) {
     console.warn("[prfToValidEthPrivKey] PRF value is not a BufferSource; raw value:", prfBuf);
   }
 
-  let importKeyInput = prfBuf;
-  if (prfBuf && typeof prfBuf === "object" && prfBuf.buffer instanceof ArrayBuffer) {
-    importKeyInput = ArrayBuffer.isView(prfBuf)
-      ? prfBuf
-      : new Uint8Array(prfBuf.buffer, prfBuf.byteOffset || 0, prfBuf.byteLength || prfBuf.buffer.byteLength);
-  }
+  const importKeyInput = normalizeToBytes(prfBuf);
 
   console.log("[prfToValidEthPrivKey] importKey input", describeValue(importKeyInput));
 
-  const baseKey = await crypto.subtle.importKey("raw", prfBuf, "HKDF", false, ["deriveBits"]);
+  const baseKey = await crypto.subtle.importKey("raw", importKeyInput, "HKDF", false, ["deriveBits"]);
   const salt = new Uint8Array(32);
 
   for (let counter = 0; counter < 16; ++counter) {
